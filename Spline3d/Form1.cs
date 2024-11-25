@@ -1,146 +1,150 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Drawing;
 using System.Windows.Forms;
 using ZedGraph;
 
 namespace Spline3d
-{ 
+{
+    public class CubicSpline
+    {
+        public double[] X { get; private set; }
+        public double[] Y { get; private set; }
+        public double[] A { get; private set; }
+        public double[] B { get; private set; }
+        public double[] C { get; private set; }
+        public double[] D { get; private set; }
+
+        public CubicSpline(double[] x, double[] y)
+        {
+            X = x;
+            Y = y;
+            int n = x.Length - 1;
+
+            A = new double[n + 1];
+            B = new double[n];
+            C = new double[n + 1];
+            D = new double[n];
+
+            for (int i = 0; i < n; i++)
+            {
+                A[i] = Y[i];
+            }
+
+            double[] h = new double[n];
+            for (int i = 0; i < n; i++)
+            {
+                h[i] = X[i + 1] - X[i];
+            }
+
+            double[] alpha = new double[n];
+            for (int i = 1; i < n-1; i++)
+            {
+                alpha[i] = (3 / h[i]) * (A[i + 1] - A[i]) - (3 / h[i - 1]) * (A[i] - A[i - 1]);
+            }
+            A[A.Length - 1] = y[y.Length - 1];
+            double[] c_l = new double[n + 1];
+            double[] c_u = new double[n];
+            double[] c_z = new double[n + 1];
+
+            c_l[0] = 1;
+            c_u[0] = 0;
+            c_z[0] = 0;
+
+            for (int i = 1; i < n; i++)
+            {
+                c_l[i] = 2 * (X[i + 1] - X[i - 1]) - h[i - 1] * c_u[i - 1];
+                c_u[i] = h[i] / c_l[i];
+                c_z[i] = (alpha[i] - h[i - 1] * c_z[i - 1]) / c_l[i];
+            }
+
+            c_l[n] = 1;
+            c_z[n] = 0;
+
+            for (int j = n - 1; j >= 0; j--)
+            {
+                C[j] = c_z[j] - c_u[j] * C[j + 1];
+                B[j] = (A[j + 1] - A[j]) / h[j] - h[j] * (C[j + 1] + 2 * C[j]) / 3;
+                D[j] = (C[j + 1] - C[j]) / (3 * h[j]);
+            }
+        }
+
+        public double GetValue(double x)
+        {
+            int n = X.Length - 1;
+            if (x < X[0] || x > X[n])
+                throw new ArgumentOutOfRangeException("x is out of range");
+
+            int i = 0;
+            while (i < n && x > X[i + 1]) i++;
+
+            double dx = x - X[i];
+            return A[i] + B[i] * dx + C[i] * dx * dx + D[i] * dx * dx * dx;
+        }
+    }
+
     public partial class Form1 : Form
     {
-        ZedGraphControl zedGraphControl1 = null;
+        private double[] x;
+        private double[] y;
+        private readonly ZedGraphControl zgc;
 
         public Form1()
         {
-            int n = 10;
-            zedGraphControl1 = new ZedGraphControl { Dock = DockStyle.Fill };
-            this.Controls.Add(zedGraphControl1);
-            GraphPane graphPane = zedGraphControl1.GraphPane;
-            graphPane.Title.Text = "График функции и кубического сплайна";
-            graphPane.XAxis.Title.Text = "x";
-            graphPane.YAxis.Title.Text = "f(x)";
+            this.Text = "Cubic Spline Example with ZedGraph";
+            this.Size = new Size(800, 600);
 
-            // Данные для функции f(x) = x^3 - x
-            List<double> xValues = new List<double>();
-            List<double> yValues = new List<double>();
-            for (double x = -1; x <= 1; x += 0.1)
-            {
-                xValues.Add(x);
-                yValues.Add(Function(x));
-            }
+            zgc = new ZedGraphControl();
+            zgc.Dock = DockStyle.Fill;
+            this.Controls.Add(zgc);
 
-            // Добавление функции в график
-            LineItem functionCurve = graphPane.AddCurve("f(x)", xValues.ToArray(), yValues.ToArray(), System.Drawing.Color.Blue, SymbolType.None);
+            // Задаем функцию
+            GenerateData();
 
-            // Параметры для кубического сплайна
-            double[] splineX = new double[n];
-            double[] splineY = new double[n];
-
-            // Интерполяция для создания сплайна
-            for (int i = 0; i < n; i++)
-            {
-                double x = -1 + (2.0 / (n - 1)) * i; // Линейно распределенные значения в диапазоне [-1, 1]
-                splineX[i] = x;
-                splineY[i] = Function(x);
-            }
-
-            // Расчет и отображение кубического сплайна
-            List<double> splinePointsX = new List<double>();
-            List<double> splinePointsY = new List<double>();
-            for (int i = 0; i < n - 1; i++)
-            {
-                for (double j = 0; j <= 1; j += 0.01)
-                {
-                    double xi = splineX[i] + j * (splineX[i + 1] - splineX[i]);
-                    double yi = InterpolatedSplineValue(splineX, splineY, xi);
-                    splinePointsX.Add(xi);
-                    splinePointsY.Add(yi);
-                }
-            }
-
-            // Добавление кубического сплайна в график
-            graphPane.AddCurve("Cubic Spline", splinePointsX.ToArray(), splinePointsY.ToArray(), System.Drawing.Color.Red, SymbolType.None);
-
-            InitializeComponent();
-            zedGraphControl1.AxisChange();
-            zedGraphControl1.Invalidate();
+            DrawPlot();
         }
 
-
-        private void PlotFunctionAndSpline(int n)
+        private void GenerateData()
         {
-            // Создание графика
-            
-            GraphPane graphPane = zedGraphControl1.GraphPane;
-            graphPane.Title.Text = "График функции и кубического сплайна";
-            graphPane.XAxis.Title.Text = "x";
-            graphPane.YAxis.Title.Text = "f(x)";
+            int points = 10; 
+            x = new double[points];
+            y = new double[points];
 
-            // Данные для функции f(x) = x^3 - x
-            List<double> xValues = new List<double>();
-            List<double> yValues = new List<double>();
-            for (double x = -1; x <= 1; x += 0.1)
+            double step = 1 / points;
+            for (int i = 0; i < points; i++)
             {
-                xValues.Add(x);
-                yValues.Add(Function(x));
+                x[i] = step++; 
+                y[i] = Math.Pow(x[i], 3); 
             }
-
-            // Добавление функции в график
-            LineItem functionCurve = graphPane.AddCurve("f(x)", xValues.ToArray(), yValues.ToArray(), System.Drawing.Color.Blue, SymbolType.None);
-
-            // Параметры для кубического сплайна
-            double[] splineX = new double[n];
-            double[] splineY = new double[n];
-
-            // Интерполяция для создания сплайна
-            for (int i = 0; i < n; i++)
-            {
-                double x = -1 + (2.0 / (n - 1)) * i; // Линейно распределенные значения в диапазоне [-1, 1]
-                splineX[i] = x;
-                splineY[i] = Function(x);
-            }
-
-            // Расчет и отображение кубического сплайна
-            List<double> splinePointsX = new List<double>();
-            List<double> splinePointsY = new List<double>();
-            for (int i = 0; i < n - 1; i++)
-            {
-                for (double j = 0; j <= 1; j += 0.01)
-                {
-                    double xi = splineX[i] + j * (splineX[i + 1] - splineX[i]);
-                    double yi = InterpolatedSplineValue(splineX, splineY, xi);
-                    splinePointsX.Add(xi);
-                    splinePointsY.Add(yi);
-                }
-            }
-
-            // Добавление кубического сплайна в график
-            graphPane.AddCurve("Cubic Spline", splinePointsX.ToArray(), splinePointsY.ToArray(), System.Drawing.Color.Red, SymbolType.None);
-
-            // Обновить график
-            zedGraphControl1.AxisChange();
-            zedGraphControl1.Invalidate();
         }
 
-        // Пример функции f(x) = x^3 - x
-        private double Function(double x)
+        private void DrawPlot()
         {
-            return Math.Pow(x, 3) - x; // Измените на вашу функцию
+            var spline = new CubicSpline(x, y);
+
+            GraphPane pane = zgc.GraphPane;
+            pane.Title.Text = "Cubic Spline Interpolation";
+            pane.XAxis.Title.Text = "x";
+            pane.YAxis.Title.Text = "y";
+
+            // Узлы
+            PointPairList points = new PointPairList();
+            for (int i = 0; i < x.Length; i++)
+            {
+                points.Add(x[i], y[i]);
+            }
+            pane.AddCurve("Функция", points, Color.Red, SymbolType.Circle);
+
+            // Сплайн
+            PointPairList splinePoints = new PointPairList();
+            for (double t = x[0]; t <= x[x.Length - 1]; t += 0.01) 
+            {
+                splinePoints.Add(t, spline.GetValue(t));
+            }
+            pane.AddCurve("Кубический сплайн", splinePoints, Color.Blue, SymbolType.None);
+
+            zgc.AxisChange();
+            zgc.Invalidate();
         }
 
-        // Метод для интерполяции с использованием кубического сплайна
-        private double InterpolatedSplineValue(double[] x, double[] y, double xi)
-        {
-            // Простейшая линейная интерполяция для демонстрации, вы можете разместить
-            // здесь алгоритм для кубического сплайна
-            for (int i = 0; i < x.Length - 1; i++)
-            {
-                if (xi >= x[i] && xi <= x[i + 1])
-                {
-                    double t = (xi - x[i]) / (x[i + 1] - x[i]);
-                    return y[i] * (1 - t) + y[i + 1] * t; // Линейная интерполяция
-                }
-            }
-            return 0; // Если xi вне диапазона
-        }
     }
 }
